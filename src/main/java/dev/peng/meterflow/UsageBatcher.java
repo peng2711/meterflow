@@ -1,8 +1,12 @@
 package dev.peng.meterflow;
 
+import dev.peng.meterflow.Contracts.ReservationView;
 import dev.peng.meterflow.Contracts.UsageView;
 import dev.peng.meterflow.UsageLedger.Charge;
+import dev.peng.meterflow.UsageLedger.Commit;
+import dev.peng.meterflow.UsageLedger.Operation;
 import dev.peng.meterflow.UsageLedger.Outcome;
+import dev.peng.meterflow.UsageLedger.Reserve;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -27,9 +31,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Group commit per tenant. A durable commit costs far more than the SQL inside it, and one tenant's
- * commits are serialized by its row lock, so charges that arrive while a batch is committing are
+ * commits are serialized by its row lock, so operations that arrive while a batch is committing are
  * queued and applied together in the next transaction. There is no wait window: an idle tenant's
- * charge starts a batch of one immediately.
+ * first operation starts a batch of one immediately.
  *
  * <p>Correctness does not depend on this class: {@link UsageLedger} locks the tenant row, so two
  * batches for the same tenant (for example on two instances) are still applied one after another.
@@ -66,7 +70,7 @@ class UsageBatcher {
         // No tenant tag: per-tenant series would grow with the number of tenants.
         this.meters = meters;
         this.batchSizes = DistributionSummary.builder("meterflow.usage.batch.size")
-                .description("Charges applied by one ledger transaction")
+                .description("Operations applied by one ledger transaction")
                 .serviceLevelObjectives(1, 2, 5, 10, 20, 50, 100)
                 .register(meters);
         this.batchDuration = Timer.builder("meterflow.usage.batch.duration")
@@ -74,26 +78,27 @@ class UsageBatcher {
                 .publishPercentileHistogram()
                 .register(meters);
         this.queueWait = Timer.builder("meterflow.usage.queue.wait")
-                .description("Time a charge waits in its tenant queue before its batch starts")
+                .description("Time an operation waits in its tenant queue before its batch starts")
                 .publishPercentileHistogram()
                 .register(meters);
         Gauge.builder("meterflow.usage.pending", pending, AtomicInteger::get)
-                .description("Charges queued and not yet picked up by a batch")
+                .description("Operations queued and not yet picked up by a batch")
                 .register(meters);
     }
 
-    CompletableFuture<UsageView> submit(String tenantId, Charge charge) {
+    /** Completes with the operation's view, or exceptionally with its {@link ApiError}. */
+    CompletableFuture<Object> submit(String tenantId, Operation operation) {
         if (closed) {
-            count("shutting_down", 1);
+            count(operation, "shutting_down", 1);
             throw shuttingDown();
         }
-        Pending item = new Pending(charge, new CompletableFuture<>(), System.nanoTime());
+        Pending item = new Pending(operation, new CompletableFuture<>(), System.nanoTime());
         TenantQueue queue = queues.computeIfAbsent(tenantId, id -> new TenantQueue(id, queueCapacity));
         // Count before offering: a worker may drain the item before this thread runs again.
         pending.incrementAndGet();
         if (!queue.items.offer(item)) {
             pending.decrementAndGet();
-            count("backlog_full", 1);
+            count(operation, "backlog_full", 1);
             throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "USAGE_BACKLOG_FULL", "该租户待处理上报过多，请稍后重试");
         }
         schedule(queue);
@@ -116,7 +121,7 @@ class UsageBatcher {
             List<Pending> stranded = new ArrayList<>();
             queue.items.drainTo(stranded);
             pending.addAndGet(-stranded.size());
-            count("shutting_down", stranded.size());
+            stranded.forEach(p -> count(p.operation, "shutting_down", 1));
             stranded.forEach(p -> p.result.completeExceptionally(shuttingDown()));
         }
     }
@@ -145,23 +150,24 @@ class UsageBatcher {
         batchSizes.record(batch.size());
         List<Outcome> outcomes;
         try {
-            outcomes = ledger.apply(tenantId, batch.stream().map(Pending::charge).toList());
+            outcomes = ledger.apply(tenantId, batch.stream().map(Pending::operation).toList());
         } catch (Throwable failure) {
-            // The transaction rolled back, so none of these charges were recorded; clients may retry.
+            // The transaction rolled back, so none of these operations took effect; clients may retry.
             batchDuration.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
-            count("failed", batch.size());
+            batch.forEach(p -> count(p.operation, "failed", 1));
             batch.forEach(p -> p.result.completeExceptionally(failure));
             return;
         }
         batchDuration.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         for (int i = 0; i < batch.size(); i++) {
             Outcome outcome = outcomes.get(i);
+            Pending pending = batch.get(i);
             if (outcome.error() != null) {
-                count(outcome.error().code().toLowerCase(Locale.ROOT), 1);
-                batch.get(i).result.completeExceptionally(outcome.error());
+                count(pending.operation, outcome.error().code().toLowerCase(Locale.ROOT), 1);
+                pending.result.completeExceptionally(outcome.error());
             } else {
-                count(outcome.view().replayed() ? "replayed" : "accepted", 1);
-                batch.get(i).result.complete(outcome.view());
+                count(pending.operation, replayed(outcome.view()) ? "replayed" : "accepted", 1);
+                pending.result.complete(outcome.view());
             }
         }
     }
@@ -175,15 +181,26 @@ class UsageBatcher {
         }
     }
 
-    private void count(String outcome, int amount) {
-        meters.counter("meterflow.usage.charges", "outcome", outcome).increment(amount);
+    private void count(Operation operation, String outcome, int amount) {
+        meters.counter("meterflow.usage.operations", "type", type(operation), "outcome", outcome).increment(amount);
+    }
+
+    private static String type(Operation operation) {
+        if (operation instanceof Charge) return "charge";
+        if (operation instanceof Reserve) return "reserve";
+        if (operation instanceof Commit) return "commit";
+        return "release";
+    }
+
+    private static boolean replayed(Object view) {
+        return view instanceof UsageView usage ? usage.replayed() : ((ReservationView) view).replayed();
     }
 
     private static ApiError shuttingDown() {
         return new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "SHUTTING_DOWN", "服务正在停止，请稍后重试");
     }
 
-    private record Pending(Charge charge, CompletableFuture<UsageView> result, long enqueuedNanos) {}
+    private record Pending(Operation operation, CompletableFuture<Object> result, long enqueuedNanos) {}
 
     private static final class TenantQueue {
         final String tenantId;

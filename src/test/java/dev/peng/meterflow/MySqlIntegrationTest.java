@@ -4,12 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
+import dev.peng.meterflow.Contracts.CommitInput;
+import dev.peng.meterflow.Contracts.ReserveInput;
 import dev.peng.meterflow.Contracts.UsageInput;
 import java.sql.Connection;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
@@ -37,10 +43,12 @@ class MySqlIntegrationTest {
     @Autowired UsageService usage;
     @Autowired JdbcTemplate jdbc;
     @Autowired DataSource dataSource;
+    @Autowired ReservationSweeper sweeper;
 
     @BeforeEach
     void clean() {
         removeFaultConstraint();
+        jdbc.update("DELETE FROM usage_reservations");
         jdbc.update("DELETE FROM usage_events");
         jdbc.update("DELETE FROM api_keys");
         jdbc.update("DELETE FROM tenants");
@@ -156,6 +164,51 @@ class MySqlIntegrationTest {
             writer.shutdownNow();
         }
         assertThat(tenants.get(tenant.id()).usedUnits()).isEqualTo(400);
+        assertThat(tenants.reconcile(tenant.id()).consistent()).isTrue();
+    }
+
+    @Test
+    void reservationsCommitsReleasesAndExpiryStayConsistentOnMySql() throws Exception {
+        var tenant = tenants.create("reserve", 500);
+        String key = tenants.issueKey(tenant.id()).apiKey();
+        CountDownLatch start = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(48);
+        List<Future<String>> results = new ArrayList<>();
+        try {
+            for (int i = 0; i < 120; i++) {
+                String requestId = "call-" + i;
+                int kind = i % 3;
+                results.add(pool.submit(() -> {
+                    if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("start timeout");
+                    try {
+                        usage.reserve(key, new ReserveInput(requestId, "model-a", 10, null));
+                        if (kind == 0) usage.commit(key, requestId, new CommitInput(7));
+                        if (kind == 1) usage.release(key, requestId);
+                        return "ok";
+                    } catch (ApiError error) {
+                        return error.code();
+                    }
+                }));
+            }
+            start.countDown();
+            for (var result : results) {
+                assertThat(result.get(30, TimeUnit.SECONDS)).isIn("ok", "QUOTA_EXCEEDED");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(tenants.reconcile(tenant.id()).consistent()).isTrue();
+        var before = tenants.get(tenant.id());
+        assertThat(before.usedUnits() + before.reservedUnits()).isLessThanOrEqualTo(500);
+
+        // Abandon the still-open third: move their deadline into the past and let the sweep reclaim them.
+        jdbc.update("UPDATE usage_reservations SET expires_at = ? WHERE tenant_id = ? AND state = 'RESERVED'",
+                Timestamp.from(Instant.now().minusSeconds(1)), tenant.id());
+        sweeper.sweep();
+
+        var after = tenants.get(tenant.id());
+        assertThat(after.reservedUnits()).isZero();
+        assertThat(after.usedUnits()).isEqualTo(before.usedUnits());
         assertThat(tenants.reconcile(tenant.id()).consistent()).isTrue();
     }
 

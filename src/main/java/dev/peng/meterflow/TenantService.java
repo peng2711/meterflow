@@ -27,14 +27,15 @@ class TenantService {
         String id = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO tenants(id, name, quota_units, used_units, created_at) VALUES (?, ?, ?, 0, ?)",
                 id, name.trim(), quotaUnits, Timestamp.from(Instant.now()));
-        return new TenantView(id, name.trim(), quotaUnits, 0, quotaUnits);
+        return new TenantView(id, name.trim(), quotaUnits, 0, 0, quotaUnits);
     }
 
     TenantView get(String tenantId) {
-        return jdbc.query("SELECT id, name, quota_units, used_units FROM tenants WHERE id = ?",
+        return jdbc.query("SELECT id, name, quota_units, used_units, reserved_units FROM tenants WHERE id = ?",
                 (rs, row) -> new TenantView(rs.getString("id"), rs.getString("name"),
-                        rs.getLong("quota_units"), rs.getLong("used_units"),
-                        rs.getLong("quota_units") - rs.getLong("used_units")), tenantId)
+                        rs.getLong("quota_units"), rs.getLong("used_units"), rs.getLong("reserved_units"),
+                        rs.getLong("quota_units") - rs.getLong("used_units") - rs.getLong("reserved_units")),
+                tenantId)
                 .stream().findFirst().orElseThrow(() -> new ApiError(HttpStatus.NOT_FOUND,
                         "TENANT_NOT_FOUND", "租户不存在"));
     }
@@ -80,16 +81,19 @@ class TenantService {
                         rs.getTimestamp("created_at").toInstant()), tenantId);
     }
 
-    // Both reads come from one MVCC snapshot. Events and the balance commit together, so the snapshot
+    // All reads come from one MVCC snapshot. Events, reservations and the balance commit together, so the snapshot
     // is consistent without the tenant lock, and a long SUM never stalls usage writes.
     @Transactional(isolation = Isolation.REPEATABLE_READ, readOnly = true)
     Reconciliation reconcile(String tenantId) {
-        Long stored = jdbc.query("SELECT used_units FROM tenants WHERE id = ?",
-                (rs, row) -> rs.getLong("used_units"), tenantId).stream().findFirst()
+        long[] stored = jdbc.query("SELECT used_units, reserved_units FROM tenants WHERE id = ?",
+                (rs, row) -> new long[] {rs.getLong("used_units"), rs.getLong("reserved_units")}, tenantId)
+                .stream().findFirst()
                 .orElseThrow(() -> new ApiError(HttpStatus.NOT_FOUND, "TENANT_NOT_FOUND", "租户不存在"));
-        Long ledger = jdbc.queryForObject(
+        long ledger = jdbc.queryForObject(
                 "SELECT COALESCE(SUM(units), 0) FROM usage_events WHERE tenant_id = ?", Long.class, tenantId);
-        long computed = ledger == null ? 0 : ledger;
-        return new Reconciliation(tenantId, stored, computed, stored == computed);
+        long open = jdbc.queryForObject("SELECT COALESCE(SUM(reserved_units), 0) FROM usage_reservations "
+                + "WHERE tenant_id = ? AND state = 'RESERVED'", Long.class, tenantId);
+        return new Reconciliation(tenantId, stored[0], ledger, stored[1], open,
+                stored[0] == ledger && stored[1] == open);
     }
 }

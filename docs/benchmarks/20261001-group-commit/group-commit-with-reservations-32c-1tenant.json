@@ -1,0 +1,91 @@
+{
+  "timestamp_utc": "2026-10-01T11:17:44.918950+00:00",
+  "scope": "loopback HTTP; application and database on same host; no upstream model",
+  "client": "Python http.client, one keep-alive connection per worker thread",
+  "mode": "charge",
+  "tenants": 1,
+  "unique_requests": 10000,
+  "retry_requests": 2000,
+  "concurrent_clients": 32,
+  "warmup_requests": 2000,
+  "summary": {
+    "rounds": 3,
+    "median_calls_per_second": 727.43,
+    "median_requests_per_second": 727.43,
+    "median_latency_ms": {
+      "p50": 41.5,
+      "p95": 64.52,
+      "p99": 77.91
+    },
+    "total_errors": 0,
+    "all_rounds_passed": true
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "accepted": 10000,
+      "replayed": 2000,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 16.13,
+      "calls_per_second": 743.95,
+      "requests_per_second": 743.95,
+      "latency_ms": {
+        "p50": 41.34,
+        "p95": 58.28,
+        "p99": 76.88
+      },
+      "stored_units": 10000,
+      "ledger_units": 10000,
+      "per_tenant_used_units": [
+        10000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "accepted": 10000,
+      "replayed": 2000,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 16.496,
+      "calls_per_second": 727.43,
+      "requests_per_second": 727.43,
+      "latency_ms": {
+        "p50": 41.5,
+        "p95": 64.52,
+        "p99": 77.91
+      },
+      "stored_units": 10000,
+      "ledger_units": 10000,
+      "per_tenant_used_units": [
+        10000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "accepted": 10000,
+      "replayed": 2000,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 17.39,
+      "calls_per_second": 690.04,
+      "requests_per_second": 690.04,
+      "latency_ms": {
+        "p50": 43.22,
+        "p95": 65.48,
+        "p99": 82.17
+      },
+      "stored_units": 10000,
+      "ledger_units": 10000,
+      "per_tenant_used_units": [
+        10000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    }
+  ]
+}

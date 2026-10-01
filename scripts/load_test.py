@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Repeatable HTTP load test for the quota and idempotency path.
 
+--mode charge reports each call's usage directly. --mode reserve makes every call reserve 2 units
+and then commit 1, so each logical call is two HTTP requests.
+
 Each worker thread reuses one keep-alive connection. Every round creates fresh tenants,
 so rounds are independent; the summary reports the median of the rounds.
 """
@@ -98,8 +101,10 @@ def run_round(parsed, admin_headers, args, number):
     api_keys = []
     expected_units = [len(range(i, args.unique, args.tenants)) for i in range(args.tenants)]
     for i in range(args.tenants):
+        # Reservations hold 2 units while in flight, so give them room to all be open at once.
+        quota = expected_units[i] * (2 if args.mode == "reserve" else 1)
         status, tenant, _ = request(parsed, "POST", "/admin/tenants",
-                                    {"name": f"load-test-{i}", "quotaUnits": expected_units[i]}, admin_headers)
+                                    {"name": f"load-test-{i}", "quotaUnits": quota}, admin_headers)
         if status != 201:
             raise RuntimeError(f"create tenant failed: HTTP {status} {tenant}")
         tenant_ids.append(tenant["id"])
@@ -115,11 +120,19 @@ def run_round(parsed, admin_headers, args, number):
 
     def charge(call):
         tenant_index, request_id = call
+        headers = {"X-Api-Key": api_keys[tenant_index]}
         try:
-            status, result, elapsed = keep_alive_request(parsed, "POST", "/v1/usage",
-                                                         {"requestId": request_id, "model": "load-test", "units": 1},
-                                                         {"X-Api-Key": api_keys[tenant_index]})
-            return status, result.get("replayed"), result.get("code"), elapsed
+            if args.mode == "charge":
+                status, result, elapsed = keep_alive_request(
+                    parsed, "POST", "/v1/usage", {"requestId": request_id, "model": "load-test", "units": 1}, headers)
+                return status, result.get("replayed"), result.get("code"), elapsed
+            status, result, reserve_ms = keep_alive_request(
+                parsed, "POST", "/v1/reservations", {"requestId": request_id, "model": "load-test", "units": 2}, headers)
+            if status != 200:
+                return status, None, result.get("code"), reserve_ms
+            status, result, commit_ms = keep_alive_request(
+                parsed, "POST", f"/v1/reservations/{request_id}/commit", {"units": 1}, headers)
+            return status, result.get("replayed"), result.get("code"), reserve_ms + commit_ms
         except Exception as exc:
             return 0, None, type(exc).__name__, None
 
@@ -141,6 +154,7 @@ def run_round(parsed, admin_headers, args, number):
         if status != 200:
             raise RuntimeError(f"reconciliation failed: HTTP {status} {reconciliation}")
         per_tenant_used.append(account["usedUnits"])
+        consistent = consistent and account.get("reservedUnits", 0) == 0
         stored_units += account["usedUnits"]
         ledger_units += reconciliation["ledgerUnits"]
         consistent = consistent and reconciliation["consistent"] and account["usedUnits"] == expected_units[i]
@@ -158,7 +172,9 @@ def run_round(parsed, admin_headers, args, number):
         "errors": len(errors),
         "error_examples": errors[:5],
         "wall_seconds": round(wall_seconds, 3),
-        "requests_per_second": round(len(calls) / wall_seconds, 2),
+        # One HTTP request per call in charge mode, two (reserve + commit) in reserve mode.
+        "calls_per_second": round(len(calls) / wall_seconds, 2),
+        "requests_per_second": round(len(calls) * (2 if args.mode == "reserve" else 1) / wall_seconds, 2),
         "latency_ms": {"p50": percentile(latencies, 0.5), "p95": percentile(latencies, 0.95),
                        "p99": percentile(latencies, 0.99)} if latencies else None,
         "stored_units": stored_units,
@@ -176,6 +192,7 @@ def main():
     parser.add_argument("--retries", type=int, default=200)
     parser.add_argument("--workers", type=int, default=32)
     parser.add_argument("--tenants", type=int, default=1)
+    parser.add_argument("--mode", choices=("charge", "reserve"), default="charge")
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=2000, help="untimed requests before round 1; 0 disables")
     parser.add_argument("--output", type=Path)
@@ -202,6 +219,7 @@ def main():
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "scope": "loopback HTTP; application and database on same host; no upstream model",
         "client": "Python http.client, one keep-alive connection per worker thread",
+        "mode": args.mode,
         "tenants": args.tenants,
         "unique_requests": args.unique,
         "retry_requests": args.retries,
@@ -209,6 +227,7 @@ def main():
         "warmup_requests": args.warmup,
         "summary": {
             "rounds": len(rounds),
+            "median_calls_per_second": round(statistics.median(r["calls_per_second"] for r in rounds), 2),
             "median_requests_per_second": round(statistics.median(r["requests_per_second"] for r in rounds), 2),
             "median_latency_ms": {k: round(statistics.median(r["latency_ms"][k] for r in rounds), 2)
                                   for k in ("p50", "p95", "p99")},

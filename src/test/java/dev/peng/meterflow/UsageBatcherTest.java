@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.peng.meterflow.Contracts.UsageInput;
 import dev.peng.meterflow.Contracts.UsageView;
 import dev.peng.meterflow.UsageLedger.Charge;
+import dev.peng.meterflow.UsageLedger.Operation;
 import dev.peng.meterflow.UsageLedger.Outcome;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.ArrayList;
@@ -27,12 +28,12 @@ class UsageBatcherTest {
         volatile RuntimeException failure;
 
         SlowLedger() {
-            super(null);
+            super(null, null);
         }
 
         @Override
-        List<Outcome> apply(String tenantId, List<Charge> charges) {
-            batchSizes.add(charges.size());
+        List<Outcome> apply(String tenantId, List<? extends Operation> operations) {
+            batchSizes.add(operations.size());
             entered.countDown();
             try {
                 release.await(5, TimeUnit.SECONDS);
@@ -42,8 +43,8 @@ class UsageBatcherTest {
             if (failure != null) {
                 throw failure;
             }
-            return charges.stream().map(c -> Outcome.ok(new UsageView("e-" + c.input().requestId(), tenantId,
-                    c.input().requestId(), c.input().model(), c.input().units(), false, 0))).toList();
+            return operations.stream().map(o -> Outcome.ok(new UsageView("e-" + o.requestId(), tenantId,
+                    o.requestId(), "model-a", 1, false, 0))).toList();
         }
     }
 
@@ -58,7 +59,7 @@ class UsageBatcherTest {
     }
 
     double outcomes(String outcome) {
-        return meters.get("meterflow.usage.charges").tag("outcome", outcome).counter().count();
+        return meters.get("meterflow.usage.operations").tags("type", "charge", "outcome", outcome).counter().count();
     }
 
     static Charge charge(String requestId) {
@@ -68,7 +69,7 @@ class UsageBatcherTest {
     @Test
     void chargesArrivingDuringACommitShareTheNextBatch() throws Exception {
         batcher = new UsageBatcher(ledger, 20, 2, 1000, meters);
-        List<CompletableFuture<UsageView>> results = new ArrayList<>();
+        List<CompletableFuture<Object>> results = new ArrayList<>();
         results.add(batcher.submit("t1", charge("first")));
         assertThat(ledger.entered.await(5, TimeUnit.SECONDS)).isTrue();
         for (int i = 0; i < 50; i++) {
@@ -77,7 +78,7 @@ class UsageBatcherTest {
         ledger.release.countDown();
 
         for (var result : results) {
-            assertThat(result.get(5, TimeUnit.SECONDS).eventId()).startsWith("e-");
+            assertThat(((UsageView) result.get(5, TimeUnit.SECONDS)).eventId()).startsWith("e-");
         }
         // One charge started alone; the 50 queued behind it went in batches capped at 20.
         assertThat(ledger.batchSizes).containsExactly(1, 20, 20, 10);

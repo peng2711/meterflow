@@ -33,6 +33,19 @@
 
 原始数据：[`20261001-group-commit/`](20261001-group-commit/)。文件名中的 `per-charge-lock` 是改造前版本，`batch-size-1` 是对照组，`group-commit` 是默认配置，`diagnostic-no-fsync` 是下面的定位实验。
 
+## 预留与结算
+
+`--mode reserve` 让每次调用先预留 2 单位、再结算 1 单位，一次调用是两个 HTTP 请求。单租户、32 并发、每轮 12,000 次调用（含 20% 重试），3 轮中位数：
+
+| 写入方式 | 完整调用/秒 | HTTP 请求/秒 | 单次调用 P99（两个请求之和） |
+|---|---:|---:|---:|
+| `batch-size=1`（每个操作一个事务） | 31.2 | 62.4 | 1,459 ms |
+| **合并提交（默认）** | **300.6** | **601.2** | **184 ms** |
+
+逐个操作提交时，一次调用要两次落盘，约 1 / (2 × 14 ms) ≈ 35 次/秒，实测 31。合并提交后预留与结算和直接上报共用租户队列，同样受益。每轮结束时冻结额度归零，账本与冻结对账一致。`batch-size=1` 这组每轮 1,200 次调用。
+
+加入预留后，直接上报的同条件测试为 727.4 req/s（3 轮 744 / 727 / 690），比加入前的 762.7 低约 5%。每个批次多了一次按 `requestId` 查预留的查询，约占单批耗时的 1%，其余差异在轮间波动范围内。原始数据：`reserve-commit-*.json`、`group-commit-with-reservations-32c-1tenant.json`。
+
 ## 定位过程
 
 1. **排除客户端。** 原脚本每个请求新建一条 TCP 连接。改为长连接后单租户仍为约 72 req/s，说明瓶颈在服务端。
@@ -84,6 +97,8 @@ export ADMIN_PASSWORD='请替换为本地密码'
 ```bash
 python3 scripts/load_test.py --tenants 1 --workers 32 --unique 10000 --retries 2000
 python3 scripts/load_test.py --tenants 8 --workers 32 --unique 10000 --retries 2000 --warmup 0
+# 预留 + 结算
+python3 scripts/load_test.py --mode reserve --tenants 1 --workers 32 --unique 10000 --retries 2000
 ```
 
 默认跑 3 轮，`--rounds` 可调整，`--output` 保存完整 JSON。磁盘不同，落盘耗时差别很大：服务器级 SSD 带掉电保护时落盘可能不到 1 ms，此时改造前后的差距会小得多。

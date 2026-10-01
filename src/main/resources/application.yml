@@ -30,3 +30,8 @@ meterflow:
     # Pending charges per tenant before new ones are rejected with 503.
     queue-capacity: ${USAGE_QUEUE_CAPACITY:10000}
     response-timeout: ${USAGE_RESPONSE_TIMEOUT:10s}
+    reservation:
+      # Used when a reservation omits ttlSeconds; must exceed the upstream call timeout, at most 1h.
+      default-ttl: ${RESERVATION_DEFAULT_TTL:5m}
+      # How often quota held by expired, never-settled reservations is returned.
+      sweep-interval: ${RESERVATION_SWEEP_INTERVAL:5s}

@@ -16,20 +16,23 @@
 
 ```text
 管理员 Basic Auth -> 创建租户 / 发放密钥 / 撤销密钥 / 查询账本
-可信上游 X-Api-Key -> 请求校验 -> 进入该租户队列
-批处理线程 -> 租户行锁 -> 逐条幂等检查 / 配额检查 -> 批量插入不可变用量事件 + 更新余额（同一事务，一次提交）
-管理员 -> 对账接口 -> 比较租户累计值与事件 SUM(units)
+可信上游 X-Api-Key -> 直接上报用量，或 调用前预留额度 -> 调用后结算实际用量 / 调用失败释放
+                  -> 请求校验 -> 进入该租户队列
+批处理线程 -> 租户行锁 -> 逐条判定幂等 / 额度 / 预留状态 -> 批量写入事件与预留 + 更新余额（同一事务，一次提交）
+后台任务 -> 回收到期未结的预留
+管理员 -> 对账接口 -> 已用对照事件 SUM(units)，冻结对照未结预留之和
 ```
 
 - **租户隔离**：所有用量事件以 `tenant_id` 归属；同一 `requestId` 在不同租户可独立使用。
 - **密钥管理**：生成 256 位随机 API 密钥，仅在发放时返回一次；数据库保存 SHA-256 摘要，支持撤销。管理员使用独立的 Basic Auth。
 - **并发扣减**：事务中使用 `SELECT ... FOR UPDATE` 锁定租户行；在锁内检查重复请求与剩余配额。数据库唯一约束 `(tenant_id, request_id)` 是第二道保护。
+- **预留与结算**：调用前冻结本次最多消耗的额度，额度不足时上游不发起调用；调用后按实际值结算并归还差额，失败则释放。数据库约束保证已用加冻结不超过额度，到期未结的预留由后台任务回收。状态机与取舍见[事务设计](docs/design.md#预留与结算)。
 - **同租户合并提交**：压测定位到单租户吞吐受限于每次提交的磁盘落盘（约 14 ms），而非锁内 SQL。同一租户在上一批提交期间到达的请求合并进下一个事务，一次落盘承载多条上报；不设等待窗口，不放宽落盘策略，不变量仍由行锁和数据库约束保证。
-- **事务隔离**：用量写入显式使用 `READ_COMMITTED`，确保等待租户锁后的重试能读到已提交的事件；余额额外受数据库 `used_units <= quota_units` 约束保护。
+- **事务隔离**：用量写入显式使用 `READ_COMMITTED`，确保等待租户锁后的重试能读到已提交的事件；余额额外受数据库 `used_units + reserved_units <= quota_units` 约束保护。
 - **幂等语义**：相同请求编号和内容再次上报时返回原事件且不重复扣减；同编号不同模型或用量返回 `409`。
 - **可审计**：事件表只追加，管理员可查看最近 50 条事件，并检查累计值与事件账本是否一致。
 
-这是**用量接收与配额控制服务**，不代理模型请求，也不自行核验上游报告的用量；因此不能把它描述为生产计费系统或模型网关。当前配额为租户的累计上限，没有自动月度重置、分布式限流或真实支付链路。
+这是**用量接收与配额控制服务**，不代理模型请求，也不自行核验上游报告的用量；因此不能把它描述为生产计费系统或模型网关。直接上报只能拒绝入账、挡不住已经发生的调用，严格预算需要上游走预留与结算。当前配额为租户的累计上限，没有自动月度重置、分布式限流或真实支付链路。
 
 ## 技术栈
 
@@ -82,9 +85,21 @@ curl -u "admin:$ADMIN_PASSWORD" \
   http://localhost:8080/admin/tenants/TENANT_ID/reconciliation
 ```
 
+预留与结算（同样使用 `X-Api-Key`）：
+
+```bash
+# 调用前冻结最多 20 单位，5 分钟内有效
+curl -H 'Content-Type: application/json' -H 'X-Api-Key: API_KEY' \
+  -d '{"requestId":"call-001","model":"example-model","units":20,"ttlSeconds":300}' \
+  http://localhost:8080/v1/reservations
+# 调用成功：按实际 13 单位结算，其余 7 单位归还；调用失败则改调 .../call-001/release
+curl -H 'Content-Type: application/json' -H 'X-Api-Key: API_KEY' -d '{"units":13}' \
+  http://localhost:8080/v1/reservations/call-001/commit
+```
+
 其他接口：`GET /admin/tenants/{id}`、`GET /admin/tenants/{id}/events`、`DELETE /admin/keys/{keyId}`、`GET /actuator/health`。
 
-运行指标：`curl -u "admin:$ADMIN_PASSWORD" http://localhost:8080/actuator/prometheus | grep meterflow_`，含批次大小分布、事务耗时、排队时间和按结果分类的上报数，说明见[事务设计](docs/design.md#运行指标)。
+运行指标：`curl -u "admin:$ADMIN_PASSWORD" http://localhost:8080/actuator/prometheus | grep meterflow_`，含批次大小分布、事务耗时、排队时间和按类型、结果分类的操作数，说明见[事务设计](docs/design.md#运行指标)。
 
 ## 验证
 

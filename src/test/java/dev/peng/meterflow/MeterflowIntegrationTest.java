@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import dev.peng.meterflow.Contracts.TenantView;
 import dev.peng.meterflow.Contracts.UsageInput;
+import dev.peng.meterflow.Contracts.UsageView;
 import dev.peng.meterflow.UsageLedger.Charge;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +49,7 @@ class MeterflowIntegrationTest {
 
     @BeforeEach
     void clean() {
+        jdbc.update("DELETE FROM usage_reservations");
         jdbc.update("DELETE FROM usage_events");
         jdbc.update("DELETE FROM api_keys");
         jdbc.update("DELETE FROM tenants");
@@ -153,6 +155,10 @@ class MeterflowIntegrationTest {
         assertThat(tenants.events(tenant.id())).hasSize(1);
     }
 
+    static UsageView view(UsageLedger.Outcome outcome) {
+        return (UsageView) outcome.view();
+    }
+
     @Test
     void chargesInOneBatchAreDecidedInOrder() {
         TenantView tenant = tenants.create("batch", 10);
@@ -169,13 +175,13 @@ class MeterflowIntegrationTest {
                 new Charge(hash, new UsageInput("r3", "model-a", 7)),
                 new Charge(hash, new UsageInput("r4", "model-a", 6))));
 
-        assertThat(outcomes.get(0).view().replayed()).isFalse();
-        assertThat(outcomes.get(0).view().remainingUnits()).isEqualTo(6);
-        assertThat(outcomes.get(1).view().replayed()).isTrue();
-        assertThat(outcomes.get(1).view().eventId()).isEqualTo(outcomes.get(0).view().eventId());
+        assertThat(view(outcomes.get(0)).replayed()).isFalse();
+        assertThat(view(outcomes.get(0)).remainingUnits()).isEqualTo(6);
+        assertThat(view(outcomes.get(1)).replayed()).isTrue();
+        assertThat(view(outcomes.get(1)).eventId()).isEqualTo(view(outcomes.get(0)).eventId());
         assertThat(outcomes.subList(2, 5)).extracting(o -> o.error().code())
                 .containsExactly("IDEMPOTENCY_CONFLICT", "INVALID_API_KEY", "QUOTA_EXCEEDED");
-        assertThat(outcomes.get(5).view().remainingUnits()).isZero();
+        assertThat(view(outcomes.get(5)).remainingUnits()).isZero();
         assertThat(tenants.get(tenant.id()).usedUnits()).isEqualTo(10);
         assertThat(tenants.events(tenant.id())).hasSize(2);
         assertThat(tenants.reconcile(tenant.id()).consistent()).isTrue();
@@ -206,8 +212,8 @@ class MeterflowIntegrationTest {
         String body = mvc.perform(get("/actuator/prometheus").with(httpBasic("test-admin", "test-password")))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 
-        assertThat(body).contains("meterflow_usage_charges_total{outcome=\"accepted\"}",
-                "meterflow_usage_charges_total{outcome=\"replayed\"}",
+        assertThat(body).contains("meterflow_usage_operations_total{outcome=\"accepted\",type=\"charge\"}",
+                "meterflow_usage_operations_total{outcome=\"replayed\",type=\"charge\"}",
                 "meterflow_usage_batch_size_count", "meterflow_usage_batch_duration_seconds_bucket",
                 "meterflow_usage_queue_wait_seconds_count", "meterflow_usage_pending");
     }
