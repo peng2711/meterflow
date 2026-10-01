@@ -17,7 +17,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
 meterflow:
   admin:
     username: ${ADMIN_USERNAME:admin}

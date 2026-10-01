@@ -1,0 +1,101 @@
+{
+  "note": "One measured round of 12,000 requests per scenario after a 500-request warm-up; deltas of /actuator/prometheus scraped before and after. Durations are histogram bucket upper bounds.",
+  "scenarios": [
+    {
+      "scenario": "32c-1tenant",
+      "requests_per_second": 752.7,
+      "p99_ms": 76.29,
+      "batches": 751,
+      "charges": 12000,
+      "mean_batch_size": 16.0,
+      "max_batch_size_in_window": 31.0,
+      "batch_size_cumulative_share_pct": {
+        "<=1": 0.0,
+        "<=2": 0.1,
+        "<=5": 0.7,
+        "<=10": 0.7,
+        "<=20": 99.5,
+        "<=50": 100.0,
+        "<=100": 100.0,
+        "<=inf": 100.0
+      },
+      "batch_duration_ms_bucket_upper": {
+        "p50": 22.4,
+        "p99": 44.7
+      },
+      "queue_wait_ms_bucket_upper": {
+        "p50": 14.0,
+        "p99": 33.6
+      },
+      "outcomes": {
+        "accepted": 10000,
+        "replayed": 2000
+      },
+      "pending_after": 0.0
+    },
+    {
+      "scenario": "32c-8tenants",
+      "requests_per_second": 607.17,
+      "p99_ms": 107.69,
+      "batches": 5490,
+      "charges": 12000,
+      "mean_batch_size": 2.2,
+      "max_batch_size_in_window": 17.0,
+      "batch_size_cumulative_share_pct": {
+        "<=1": 40.7,
+        "<=2": 65.5,
+        "<=5": 98.0,
+        "<=10": 100.0,
+        "<=20": 100.0,
+        "<=50": 100.0,
+        "<=100": 100.0,
+        "<=inf": 100.0
+      },
+      "batch_duration_ms_bucket_upper": {
+        "p50": 28.0,
+        "p99": 61.5
+      },
+      "queue_wait_ms_bucket_upper": {
+        "p50": 22.4,
+        "p99": 50.3
+      },
+      "outcomes": {
+        "accepted": 10000,
+        "replayed": 2000
+      },
+      "pending_after": 0.0
+    },
+    {
+      "scenario": "128c-1tenant",
+      "requests_per_second": 1732.64,
+      "p99_ms": 163.0,
+      "batches": 254,
+      "charges": 12000,
+      "mean_batch_size": 47.2,
+      "max_batch_size_in_window": 99.0,
+      "batch_size_cumulative_share_pct": {
+        "<=1": 0.0,
+        "<=2": 0.8,
+        "<=5": 1.2,
+        "<=10": 1.6,
+        "<=20": 3.9,
+        "<=50": 68.1,
+        "<=100": 100.0,
+        "<=inf": 100.0
+      },
+      "batch_duration_ms_bucket_upper": {
+        "p50": 22.4,
+        "p99": 61.5
+      },
+      "queue_wait_ms_bucket_upper": {
+        "p50": 15.4,
+        "p99": 50.3
+      },
+      "outcomes": {
+        "accepted": 10000,
+        "replayed": 2000
+      },
+      "pending_after": 0.0
+    }
+  ]
+}

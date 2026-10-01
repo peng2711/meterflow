@@ -84,6 +84,8 @@ curl -u "admin:$ADMIN_PASSWORD" \
 
 其他接口：`GET /admin/tenants/{id}`、`GET /admin/tenants/{id}/events`、`DELETE /admin/keys/{keyId}`、`GET /actuator/health`。
 
+运行指标：`curl -u "admin:$ADMIN_PASSWORD" http://localhost:8080/actuator/prometheus | grep meterflow_`，含批次大小分布、事务耗时、排队时间和按结果分类的上报数，说明见[事务设计](docs/design.md#运行指标)。
+
 ## 验证
 
 ```bash

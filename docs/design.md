@@ -46,6 +46,32 @@ MySQL 默认的 `REPEATABLE READ` 可能在事务首次读取时建立快照。�
 
 **正确性不依赖批处理器。** 不变量仍由租户行锁、唯一约束和 `CHECK` 约束守住。即使同一租户短暂出现两个批次（例如多实例部署，或队列被回收的瞬间），它们也只是在数据库行锁上排队。`meterflow.usage.batch-size=1` 时每条上报单独一个事务，可作对照。
 
+## 运行指标
+
+`/actuator/prometheus`（需管理员 Basic Auth）导出以下业务指标。指标不带租户标签，避免时间序列数随租户数增长。
+
+| 指标 | 类型 | 含义 |
+|---|---|---|
+| `meterflow_usage_charges_total{outcome}` | 计数器 | 每条上报的结果：`accepted`、`replayed`、`idempotency_conflict`、`quota_exceeded`、`invalid_api_key`、`backlog_full`、`shutting_down`、`failed` |
+| `meterflow_usage_batch_size` | 分布 | 每个账本事务承载的上报数；桶为 1、2、5、10、20、50、100 |
+| `meterflow_usage_batch_duration_seconds` | 计时器 | 一个批次的事务耗时：加租户锁、SQL、持久化提交 |
+| `meterflow_usage_queue_wait_seconds` | 计时器 | 上报在租户队列中等到所在批次开始的时间 |
+| `meterflow_usage_pending` | 仪表 | 已入队、尚未被批次取走的上报数 |
+| `meterflow_usage_response_timeouts_total` | 计数器 | 请求线程等待超时的次数；这类上报可能稍后才提交，因此不计入 `outcome` |
+
+常用查询：
+
+```promql
+# 平均每个事务承载的上报数：合并提交是否在起作用
+rate(meterflow_usage_batch_size_sum[1m]) / rate(meterflow_usage_batch_size_count[1m])
+# 事务耗时 P99：落盘是否变慢
+histogram_quantile(0.99, rate(meterflow_usage_batch_duration_seconds_bucket[1m]))
+# 额度拒绝占比
+sum(rate(meterflow_usage_charges_total{outcome="quota_exceeded"}[5m])) / sum(rate(meterflow_usage_charges_total[5m]))
+```
+
+排查时，平均批次大小接近 1 而排队时间上升，说明瓶颈不在合并而在单次提交；`pending` 持续增长或出现 `backlog_full`，说明写入超过了落盘能力。
+
 ## 已验证的边界
 
 - 两个并发上报使用同一请求编号：一笔扣减，一次回放。

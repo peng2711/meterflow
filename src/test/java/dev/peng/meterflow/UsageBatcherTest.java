@@ -7,6 +7,7 @@ import dev.peng.meterflow.Contracts.UsageInput;
 import dev.peng.meterflow.Contracts.UsageView;
 import dev.peng.meterflow.UsageLedger.Charge;
 import dev.peng.meterflow.UsageLedger.Outcome;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -47,6 +48,7 @@ class UsageBatcherTest {
     }
 
     final SlowLedger ledger = new SlowLedger();
+    final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     UsageBatcher batcher;
 
     @AfterEach
@@ -55,13 +57,17 @@ class UsageBatcherTest {
         batcher.close();
     }
 
+    double outcomes(String outcome) {
+        return meters.get("meterflow.usage.charges").tag("outcome", outcome).counter().count();
+    }
+
     static Charge charge(String requestId) {
         return new Charge("hash", new UsageInput(requestId, "model-a", 1));
     }
 
     @Test
     void chargesArrivingDuringACommitShareTheNextBatch() throws Exception {
-        batcher = new UsageBatcher(ledger, 20, 2, 1000);
+        batcher = new UsageBatcher(ledger, 20, 2, 1000, meters);
         List<CompletableFuture<UsageView>> results = new ArrayList<>();
         results.add(batcher.submit("t1", charge("first")));
         assertThat(ledger.entered.await(5, TimeUnit.SECONDS)).isTrue();
@@ -76,11 +82,19 @@ class UsageBatcherTest {
         // One charge started alone; the 50 queued behind it went in batches capped at 20.
         assertThat(ledger.batchSizes).containsExactly(1, 20, 20, 10);
         assertThat(batcher.batches()).isEqualTo(4);
+        var sizes = meters.get("meterflow.usage.batch.size").summary();
+        assertThat(sizes.count()).isEqualTo(4);
+        assertThat(sizes.totalAmount()).isEqualTo(51);
+        assertThat(sizes.max()).isEqualTo(20);
+        assertThat(outcomes("accepted")).isEqualTo(51);
+        assertThat(meters.get("meterflow.usage.queue.wait").timer().count()).isEqualTo(51);
+        assertThat(meters.get("meterflow.usage.batch.duration").timer().count()).isEqualTo(4);
+        assertThat(meters.get("meterflow.usage.pending").gauge().value()).isZero();
     }
 
     @Test
     void fullTenantBacklogIsRejectedWithoutBlocking() throws Exception {
-        batcher = new UsageBatcher(ledger, 10, 1, 2);
+        batcher = new UsageBatcher(ledger, 10, 1, 2, meters);
         var first = batcher.submit("t1", charge("in-flight"));
         assertThat(ledger.entered.await(5, TimeUnit.SECONDS)).isTrue();
         var second = batcher.submit("t1", charge("queued-1"));
@@ -89,6 +103,8 @@ class UsageBatcherTest {
         assertThatThrownBy(() -> batcher.submit("t1", charge("overflow")))
                 .isInstanceOf(ApiError.class)
                 .satisfies(e -> assertThat(((ApiError) e).code()).isEqualTo("USAGE_BACKLOG_FULL"));
+        assertThat(outcomes("backlog_full")).isEqualTo(1);
+        assertThat(meters.get("meterflow.usage.pending").gauge().value()).isEqualTo(2);
         // Other tenants have their own backlog.
         var otherTenant = batcher.submit("t2", charge("other"));
         ledger.release.countDown();
@@ -99,7 +115,7 @@ class UsageBatcherTest {
 
     @Test
     void failedTransactionFailsEveryChargeInTheBatch() throws Exception {
-        batcher = new UsageBatcher(ledger, 10, 1, 100);
+        batcher = new UsageBatcher(ledger, 10, 1, 100, meters);
         ledger.failure = new IllegalStateException("commit failed");
         var first = batcher.submit("t1", charge("a"));
         assertThat(ledger.entered.await(5, TimeUnit.SECONDS)).isTrue();
@@ -111,11 +127,12 @@ class UsageBatcherTest {
                     .isInstanceOf(ExecutionException.class)
                     .hasRootCauseMessage("commit failed");
         }
+        assertThat(outcomes("failed")).isEqualTo(2);
     }
 
     @Test
     void submissionsAfterCloseAreRefused() throws Exception {
-        batcher = new UsageBatcher(ledger, 10, 1, 100);
+        batcher = new UsageBatcher(ledger, 10, 1, 100, meters);
         ledger.release.countDown();
         batcher.close();
 

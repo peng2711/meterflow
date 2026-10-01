@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -29,6 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@AutoConfigureObservability // Boot disables metric exporters in tests unless asked; the Prometheus test needs one.
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:h2:mem:meterflowtest;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "debug=false",
@@ -190,6 +193,23 @@ class MeterflowIntegrationTest {
                 entry("QUOTA_EXCEEDED", 100L));
         assertThat(tenants.get(tenant.id()).usedUnits()).isEqualTo(150);
         assertThat(tenants.reconcile(tenant.id()).consistent()).isTrue();
+    }
+
+    @Test
+    void prometheusEndpointRequiresAdminAndExportsUsageMetrics() throws Exception {
+        TenantView tenant = tenants.create("metrics", 5);
+        String key = tenants.issueKey(tenant.id()).apiKey();
+        usage.record(key, new UsageInput("m1", "model-a", 1));
+        usage.record(key, new UsageInput("m1", "model-a", 1));
+
+        mvc.perform(get("/actuator/prometheus")).andExpect(status().isUnauthorized());
+        String body = mvc.perform(get("/actuator/prometheus").with(httpBasic("test-admin", "test-password")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("meterflow_usage_charges_total{outcome=\"accepted\"}",
+                "meterflow_usage_charges_total{outcome=\"replayed\"}",
+                "meterflow_usage_batch_size_count", "meterflow_usage_batch_duration_seconds_bucket",
+                "meterflow_usage_queue_wait_seconds_count", "meterflow_usage_pending");
     }
 
     @Test
