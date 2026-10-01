@@ -1,0 +1,86 @@
+{
+  "timestamp_utc": "2026-10-01T08:21:57.584248+00:00",
+  "scope": "loopback HTTP; application and database on same host; no upstream model",
+  "client": "Python http.client, one keep-alive connection per worker thread",
+  "tenants": 1,
+  "unique_requests": 10000,
+  "retry_requests": 2000,
+  "concurrent_clients": 32,
+  "warmup_requests": 2000,
+  "summary": {
+    "rounds": 3,
+    "median_requests_per_second": 762.7,
+    "median_latency_ms": {
+      "p50": 40.19,
+      "p95": 52.95,
+      "p99": 65.05
+    },
+    "total_errors": 0,
+    "all_rounds_passed": true
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "accepted": 10000,
+      "replayed": 2000,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 15.829,
+      "requests_per_second": 758.12,
+      "latency_ms": {
+        "p50": 40.19,
+        "p95": 52.95,
+        "p99": 65.05
+      },
+      "stored_units": 10000,
+      "ledger_units": 10000,
+      "per_tenant_used_units": [
+        10000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "accepted": 10000,
+      "replayed": 2000,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 15.185,
+      "requests_per_second": 790.27,
+      "latency_ms": {
+        "p50": 40.11,
+        "p95": 51.07,
+        "p99": 59.06
+      },
+      "stored_units": 10000,
+      "ledger_units": 10000,
+      "per_tenant_used_units": [
+        10000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "accepted": 10000,
+      "replayed": 2000,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 15.734,
+      "requests_per_second": 762.7,
+      "latency_ms": {
+        "p50": 40.87,
+        "p95": 54.13,
+        "p99": 65.25
+      },
+      "stored_units": 10000,
+      "ledger_units": 10000,
+      "per_tenant_used_units": [
+        10000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    }
+  ]
+}

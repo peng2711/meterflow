@@ -1,0 +1,32 @@
+server:
+  address: ${HOST:127.0.0.1}
+  port: ${PORT:8080}
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:h2:file:./data/meterflow;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_ON_EXIT=FALSE}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
+    hikari:
+      # Batch workers each hold a connection while committing; leave room for auth and admin reads.
+      maximum-pool-size: ${DB_POOL_SIZE:16}
+  flyway:
+    enabled: true
+  jackson:
+    default-property-inclusion: non_null
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+meterflow:
+  admin:
+    username: ${ADMIN_USERNAME:admin}
+    password: ${ADMIN_PASSWORD:local-demo-only}
+  usage:
+    # Most charges one transaction may group for a tenant; 1 restores one commit per charge.
+    batch-size: ${USAGE_BATCH_SIZE:100}
+    # Tenants whose batches can commit in parallel.
+    workers: ${USAGE_WORKERS:8}
+    # Pending charges per tenant before new ones are rejected with 503.
+    queue-capacity: ${USAGE_QUEUE_CAPACITY:10000}
+    response-timeout: ${USAGE_RESPONSE_TIMEOUT:10s}

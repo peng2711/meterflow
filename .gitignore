@@ -1,0 +1,11 @@
+target/
+data/
+.idea/
+*.iml
+.env
+__pycache__/
+*.pyc
+
+# Personal job-search notes; not part of the project
+RESUME.md
+INTERVIEW.md

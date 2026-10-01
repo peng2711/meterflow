@@ -1,0 +1,22 @@
+{
+  "timestamp_utc": "2026-10-01T03:08:25.280315+00:00",
+  "scope": "loopback HTTP; one tenant; application and database on same host; no upstream model",
+  "unique_requests": 1000,
+  "retry_requests": 200,
+  "concurrent_clients": 32,
+  "accepted": 1000,
+  "replayed": 200,
+  "errors": 0,
+  "error_examples": [],
+  "wall_seconds": 17.353,
+  "requests_per_second": 69.15,
+  "latency_ms": {
+    "p50": 460.6,
+    "p95": 583.62,
+    "p99": 699.59
+  },
+  "stored_units": 1000,
+  "ledger_units": 1000,
+  "reconciliation_consistent": true,
+  "passed": true
+}

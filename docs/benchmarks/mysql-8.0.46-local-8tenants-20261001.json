@@ -1,0 +1,33 @@
+{
+  "timestamp_utc": "2026-10-01T03:09:38.923754+00:00",
+  "scope": "loopback HTTP; application and database on same host; no upstream model",
+  "tenants": 8,
+  "unique_requests": 1000,
+  "retry_requests": 200,
+  "concurrent_clients": 32,
+  "accepted": 1000,
+  "replayed": 200,
+  "errors": 0,
+  "error_examples": [],
+  "wall_seconds": 4.964,
+  "requests_per_second": 241.75,
+  "latency_ms": {
+    "p50": 114.95,
+    "p95": 241.52,
+    "p99": 321.89
+  },
+  "stored_units": 1000,
+  "ledger_units": 1000,
+  "per_tenant_used_units": [
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125
+  ],
+  "reconciliation_consistent": true,
+  "passed": true
+}

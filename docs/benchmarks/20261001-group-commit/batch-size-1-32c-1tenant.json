@@ -1,0 +1,86 @@
+{
+  "timestamp_utc": "2026-10-01T06:27:15.888395+00:00",
+  "scope": "loopback HTTP; application and database on same host; no upstream model",
+  "client": "Python http.client, one keep-alive connection per worker thread",
+  "tenants": 1,
+  "unique_requests": 1000,
+  "retry_requests": 200,
+  "concurrent_clients": 32,
+  "warmup_requests": 2000,
+  "summary": {
+    "rounds": 3,
+    "median_requests_per_second": 69.16,
+    "median_latency_ms": {
+      "p50": 458.88,
+      "p95": 623.08,
+      "p99": 872.47
+    },
+    "total_errors": 0,
+    "all_rounds_passed": true
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "accepted": 1000,
+      "replayed": 200,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 17.351,
+      "requests_per_second": 69.16,
+      "latency_ms": {
+        "p50": 458.88,
+        "p95": 623.08,
+        "p99": 872.47
+      },
+      "stored_units": 1000,
+      "ledger_units": 1000,
+      "per_tenant_used_units": [
+        1000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "accepted": 1000,
+      "replayed": 200,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 19.803,
+      "requests_per_second": 60.6,
+      "latency_ms": {
+        "p50": 461.66,
+        "p95": 905.06,
+        "p99": 996.7
+      },
+      "stored_units": 1000,
+      "ledger_units": 1000,
+      "per_tenant_used_units": [
+        1000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "accepted": 1000,
+      "replayed": 200,
+      "errors": 0,
+      "error_examples": [],
+      "wall_seconds": 16.977,
+      "requests_per_second": 70.69,
+      "latency_ms": {
+        "p50": 453.86,
+        "p95": 552.78,
+        "p99": 737.14
+      },
+      "stored_units": 1000,
+      "ledger_units": 1000,
+      "per_tenant_used_units": [
+        1000
+      ],
+      "reconciliation_consistent": true,
+      "passed": true
+    }
+  ]
+}

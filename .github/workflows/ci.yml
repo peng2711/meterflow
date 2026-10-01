@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-only
+          MYSQL_DATABASE: meterflow_test
+          MYSQL_USER: meterflow
+          MYSQL_PASSWORD: ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Enables MySqlIntegrationTest; H2 tests run regardless.
+      METERFLOW_MYSQL_TEST_URL: jdbc:mysql://127.0.0.1:3306/meterflow_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      METERFLOW_MYSQL_TEST_USER: meterflow
+      METERFLOW_MYSQL_TEST_PASSWORD: ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Test (H2 and MySQL 8.4)
+        run: ./mvnw -B test
+      - name: Fail if MySQL tests were skipped
+        run: |
+          grep -q 'Skipped: 0' target/surefire-reports/dev.peng.meterflow.MySqlIntegrationTest.txt
