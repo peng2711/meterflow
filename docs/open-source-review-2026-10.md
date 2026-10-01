@@ -29,7 +29,7 @@
 ### P0：发布前必须明确和补齐
 
 1. **修正额度语义。** 先把 README/API 文档中的“配额控制”解释为“入账额度控制”。若目标是严格阻止上游超用，设计 `reserve → commit/release`：预留时占额度，结算时用实际值替换，失败时释放；为超时预留、重复结算、预留不足、结算超额和崩溃恢复定义行为。验收：并发请求不能超额预留，重复操作结果稳定，余额与事件、未结算预留可对账。这是最有价值的下一阶段功能。[LiteLLM 的预算预留说明](https://docs.litellm.ai/docs/proxy/users)
-2. **建立真正的开源仓库。** 已初始化 git，并加入在 MySQL 8.4 上运行全部测试的 [CI 工作流](../.github/workflows/ci.yml)；仍缺少 `LICENSE`、`CONTRIBUTING.md`、`SECURITY.md` 与版本发布说明。先由作者选择开源许可证，再初始化仓库、加入上述文件，发布公开仓库；无许可证的公开代码不等于获得修改和分发许可。[GitHub 社区健康指南](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions)、[GitHub 安全策略指南](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/add-security-policy)、[许可证说明](https://choosealicense.com/no-permission/)
+2. **建立真正的开源仓库。** 已发布公开仓库，采用 [MIT 许可证](../LICENSE)，并加入在 MySQL 8.4 上运行全部测试的 [CI 工作流](../.github/workflows/ci.yml)；仍缺少 `CONTRIBUTING.md`、`SECURITY.md` 与版本发布说明。[GitHub 社区健康指南](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions)、[GitHub 安全策略指南](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/add-security-policy)、[许可证说明](https://choosealicense.com/no-permission/)
 3. **让使用者一键复现。** 现有 Compose [只启动 MySQL](../docker-compose.yml)，应用需手动配置并运行；补应用镜像、应用与数据库的 Compose 编排、环境变量模板、完整演示脚本、OpenAPI 文档和版本化变更说明。CI 应跑 H2 测试和 MySQL 集成测试，并验证迁移。验收：全新环境按 README 的固定步骤可完成启动、创建租户、写入、重试、对账。
 
 ### P1：形成有辨识度的后端能力
